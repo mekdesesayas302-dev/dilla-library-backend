@@ -6,14 +6,13 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from 'url';
 
-// Fix for __dirname in ES Modules (Required for static file serving on Render)
+// --- ES MODULE FIXES ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
-/* ================= MIDDLEWARE ================= */
-// Use the FRONTEND_URL from your Render Environment Variables for better security
+// --- MIDDLEWARE ---
 app.use(cors({
     origin: process.env.FRONTEND_URL || "*",
     methods: ["GET", "POST", "PUT", "DELETE"],
@@ -21,14 +20,14 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Create uploads folder if it doesn't exist
+// --- UPLOADS DIRECTORY ---
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir);
 }
 app.use("/uploads", express.static(uploadDir));
 
-/* ================= TIDB CONNECTION ================= */
+// --- TIDB DATABASE CONNECTION ---
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -36,7 +35,7 @@ const db = mysql.createConnection({
     database: process.env.DB_NAME,
     port: process.env.DB_PORT || 4000,
     ssl: {
-        rejectUnauthorized: false // Crucial for TiDB Cloud connection
+        rejectUnauthorized: false // Required for TiDB Cloud
     }
 });
 
@@ -48,7 +47,7 @@ db.connect(err => {
     }
 });
 
-/* ================= FILE UPLOAD CONFIG ================= */
+// --- MULTER STORAGE CONFIG ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, uploadDir);
@@ -57,57 +56,30 @@ const storage = multer.diskStorage({
         cb(null, Date.now() + path.extname(file.originalname));
     }
 });
-
 const upload = multer({ storage });
 
-/* ================= SUBSCRIBE API ================= */
-app.post("/api/subscribe", (req, res) => {
-    const { email } = req.body;
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// --- HELPER: GENERATE PUBLIC URL ---
+// This prevents saving "localhost" into the database on Render
+const getBaseUrl = (req) => {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.get("host");
+    return `${protocol}://${host}`;
+};
 
-    if (!email || !emailRegex.test(email)) {
-        return res.status(400).json({ message: "Valid email required" });
-    }
+/* ================= API ENDPOINTS ================= */
 
-    const sql = "INSERT INTO subscribers (email) VALUES (?)";
-    db.query(sql, [email], (err) => {
-        if (err) {
-            if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "Already subscribed" });
-            return res.status(500).json({ message: "Database error" });
-        }
-        res.json({ message: "Subscribed successfully!" });
-    });
-});
-
-/* ================= CONTACT API ================= */
-app.post("/api/contact", (req, res) => {
-    const { name, email, subject, message } = req.body;
-    if (!name || !email || !message) return res.status(400).json({ message: "All fields required" });
-
-    const sql = "INSERT INTO contacts (name, email, subject, message) VALUES (?, ?, ?, ?)";
-    db.query(sql, [name, email, subject, message], (err) => {
-        if (err) return res.status(500).json({ message: "Database error" });
-        res.json({ message: "Message saved successfully" });
-    });
-});
-
-app.get("/api/contact", (req, res) => {
-    db.query("SELECT * FROM contacts ORDER BY id DESC", (err, result) => {
-        if (err) return res.status(500).json({ message: "Failed to fetch contacts" });
-        res.json(result);
-    });
-});
-
-/* ================= NEWS API ================= */
+// --- NEWS API ---
 app.get("/api/news", (req, res) => {
-    db.query("SELECT * FROM news ORDER BY id DESC", (err, result) => {
-        if (err) return res.status(500).json({ message: "Failed to fetch news" });
+    const sql = "SELECT * FROM news ORDER BY id DESC";
+    db.query(sql, (err, result) => {
+        if (err) return res.status(500).json({ message: "Error fetching news" });
         res.json(result);
     });
 });
 
 app.get("/api/news/:id", (req, res) => {
-    db.query("SELECT * FROM news WHERE id = ?", [req.params.id], (err, result) => {
+    const sql = "SELECT * FROM news WHERE id = ?";
+    db.query(sql, [req.params.id], (err, result) => {
         if (err) return res.status(500).json({ message: "Database error" });
         if (result.length === 0) return res.status(404).json({ message: "News not found" });
         res.json(result[0]);
@@ -116,20 +88,19 @@ app.get("/api/news/:id", (req, res) => {
 
 app.post("/api/news", upload.single("image"), (req, res) => {
     const { title, content, excerpt, category, date } = req.body;
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const image = req.file ? `${baseUrl}/uploads/${req.file.filename}` : "";
+    const imagePath = req.file ? `${getBaseUrl(req)}/uploads/${req.file.filename}` : "";
 
     const sql = "INSERT INTO news (title, content, excerpt, category, image, date) VALUES (?, ?, ?, ?, ?, ?)";
-    db.query(sql, [title, content, excerpt, category, image, date], (err) => {
+    db.query(sql, [title, content, excerpt, category, imagePath, date], (err) => {
         if (err) return res.status(500).json({ message: "Database error" });
-        res.json({ message: "News added" });
+        res.json({ message: "News added successfully" });
     });
 });
 
-/* ================= EVENTS API ================= */
+// --- EVENTS API ---
 app.get("/api/events", (req, res) => {
     db.query("SELECT * FROM events ORDER BY id DESC", (err, result) => {
-        if (err) return res.status(500).json({ message: "Failed to fetch events" });
+        if (err) return res.status(500).json({ message: "Error fetching events" });
         res.json(result);
     });
 });
@@ -143,48 +114,56 @@ app.post("/api/events", (req, res) => {
     });
 });
 
-/* ================= STAFF API ================= */
+// --- STAFF API ---
 app.get("/api/staff", (req, res) => {
     db.query("SELECT * FROM staff ORDER BY id DESC", (err, result) => {
-        if (err) return res.status(500).json({ message: "Failed to fetch staff" });
+        if (err) return res.status(500).json({ message: "Error fetching staff" });
         res.json(result);
-    });
-});
-
-app.get("/api/staff/:id", (req, res) => {
-    db.query("SELECT * FROM staff WHERE id = ?", [req.params.id], (err, result) => {
-        if (err) return res.status(500).json({ message: "Database error" });
-        if (result.length === 0) return res.status(404).json({ message: "Staff not found" });
-        res.json(result[0]);
     });
 });
 
 app.post("/api/staff", upload.single("image"), (req, res) => {
     const { name, position, campus, department, bio, email, phone } = req.body;
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const image = req.file ? `${baseUrl}/uploads/${req.file.filename}` : "";
+    const imagePath = req.file ? `${getBaseUrl(req)}/uploads/${req.file.filename}` : "";
 
     const sql = "INSERT INTO staff (name, position, campus, department, bio, email, phone, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-    db.query(sql, [name, position, campus, department, bio, email, phone, image], (err) => {
+    db.query(sql, [name, position, campus, department, bio, email, phone, imagePath], (err) => {
         if (err) return res.status(500).json({ message: "Database error" });
-        res.json({ message: "Staff added successfully" });
+        res.json({ message: "Staff added" });
     });
 });
 
-/* ================= CAMPUSES & LIBRARIES API ================= */
+// --- CONTACT & SUBSCRIBE ---
+app.post("/api/subscribe", (req, res) => {
+    const { email } = req.body;
+    const sql = "INSERT INTO subscribers (email) VALUES (?)";
+    db.query(sql, [email], (err) => {
+        if (err) return res.status(500).json({ message: "Database error" });
+        res.json({ message: "Subscribed!" });
+    });
+});
+
+app.post("/api/contact", (req, res) => {
+    const { name, email, subject, message } = req.body;
+    const sql = "INSERT INTO contacts (name, email, subject, message) VALUES (?, ?, ?, ?)";
+    db.query(sql, [name, email, subject, message], (err) => {
+        if (err) return res.status(500).json({ message: "Database error" });
+        res.json({ message: "Message saved" });
+    });
+});
+
+// --- CAMPUSES ---
 app.get("/api/campuses-full", (req, res) => {
     const sql = `
-    SELECT 
-      c.id as campus_id, c.name as campus_name, c.description,
-      l.id as lib_id, l.name as lib_name, l.capacity, l.is_main, l.lib_type
-    FROM campuses c
-    LEFT JOIN libraries l ON c.id = l.campus_id
-    ORDER BY c.id ASC
-  `;
-
+        SELECT c.id as campus_id, c.name as campus_name, c.description,
+               l.id as lib_id, l.name as lib_name, l.capacity, l.is_main, l.lib_type
+        FROM campuses c
+        LEFT JOIN libraries l ON c.id = l.campus_id
+        ORDER BY c.id ASC
+    `;
     db.query(sql, (err, rows) => {
-        if (err) return res.status(500).json({ message: "Database error", error: err });
-
+        if (err) return res.status(500).json({ message: "Database error" });
+        
         const formattedData = rows.reduce((acc, row) => {
             let campus = acc.find(c => c.id === row.campus_id);
             if (!campus) {
@@ -193,22 +172,17 @@ app.get("/api/campuses-full", (req, res) => {
             }
             if (row.lib_id) {
                 campus.libraries.push({
-                    id: row.lib_id,
-                    name: row.lib_name,
-                    capacity: row.capacity,
-                    isMain: !!row.is_main,
-                    type: row.lib_type
+                    id: row.lib_id, name: row.lib_name, capacity: row.capacity,
+                    isMain: !!row.is_main, type: row.lib_type
                 });
             }
             return acc;
         }, []);
-
         res.json(formattedData);
     });
 });
 
-/* ================= SERVER START ================= */
-// Use process.env.PORT for Render deployment
+// --- START SERVER ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server is running on port ${PORT}`);

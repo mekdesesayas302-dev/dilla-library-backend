@@ -3,12 +3,12 @@ const router = express.Router();
 const db = require("../db");
 const nodemailer = require("nodemailer");
 
-/* EMAIL CONFIG */
+/* EMAIL CONFIG (Use Environment Variables!) */
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "your-email@gmail.com",
-    pass: "your-app-password"
+    user: process.env.EMAIL_USER, // Set this in Render Dashboard
+    pass: process.env.EMAIL_PASS  // Set this in Render Dashboard
   }
 });
 
@@ -17,17 +17,25 @@ router.post("/", (req, res) => {
   const { name, email, subject, message } = req.body;
 
   db.query(
-    "INSERT INTO contacts (name,email,subject,message) VALUES (?,?,?,?)",
+    "INSERT INTO contacts (name, email, subject, message) VALUES (?,?,?,?)",
     [name, email, subject, message],
     (err) => {
-      if (err) return res.status(500).json(err);
+      if (err) {
+        console.error("DB Error:", err);
+        return res.status(500).json({ error: "Database insertion failed" });
+      }
 
-      // send email
-      transporter.sendMail({
-        from: email,
-        to: "your-email@gmail.com",
-        subject: subject,
-        text: message
+      // send email notifications
+      const mailOptions = {
+        from: process.env.EMAIL_USER, // Must be your authenticated email
+        replyTo: email,              // The person who filled the form
+        to: process.env.EMAIL_USER,   // Where you want to receive the mail
+        subject: `Library Contact: ${subject}`,
+        text: `From: ${name} (${email})\n\nMessage: ${message}`
+      };
+
+      transporter.sendMail(mailOptions, (error, info) => {
+        if (error) console.error("Email Error:", error);
       });
 
       res.json({ success: true });

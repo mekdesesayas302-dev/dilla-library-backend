@@ -54,7 +54,7 @@ const getBaseUrl = (req) => {
 
 /* ================= 4. API ENDPOINTS ================= */
 
-// --- NEWS (Matches your 'news' table) ---
+// --- NEWS ---
 app.get("/api/news", (req, res) => {
     db.query("SELECT * FROM news ORDER BY date DESC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -62,7 +62,16 @@ app.get("/api/news", (req, res) => {
     });
 });
 
-// --- EVENTS (Matches your 'events' table) ---
+// Added: Single News Route
+app.get("/api/news/:id", (req, res) => {
+    db.query("SELECT * FROM news WHERE id = ?", [req.params.id], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (result.length === 0) return res.status(404).json({ message: "News not found" });
+        res.json(result[0]);
+    });
+});
+
+// --- EVENTS ---
 app.get("/api/events", (req, res) => {
     db.query("SELECT * FROM events ORDER BY event_date ASC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -70,7 +79,7 @@ app.get("/api/events", (req, res) => {
     });
 });
 
-// --- STAFF (Matches your 'staff' table) ---
+// --- STAFF ---
 app.get("/api/staff", (req, res) => {
     db.query("SELECT * FROM staff ORDER BY id ASC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -78,7 +87,16 @@ app.get("/api/staff", (req, res) => {
     });
 });
 
-// --- CAMPUS & LIBRARIES (Matches 'campuses' + 'libraries' tables) ---
+// Added: Single Staff Route (This fixes your "Staff profile not found" error)
+app.get("/api/staff/:id", (req, res) => {
+    db.query("SELECT * FROM staff WHERE id = ?", [req.params.id], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (result.length === 0) return res.status(404).json({ message: "Staff not found" });
+        res.json(result[0]);
+    });
+});
+
+// --- CAMPUS & LIBRARIES ---
 app.get("/api/campuses-full", (req, res) => {
     const sql = `
         SELECT c.id as campus_id, c.name as campus_name, c.description,
@@ -105,8 +123,8 @@ app.get("/api/campuses-full", (req, res) => {
                     id: curr.lib_id,
                     name: curr.lib_name,
                     capacity: curr.capacity,
-                    type: curr.lib_type, // Matches your 'lib_type' column
-                    isMain: curr.is_main // Matches your 'is_main' column
+                    type: curr.lib_type,
+                    isMain: curr.is_main 
                 });
             }
             return acc;
@@ -115,7 +133,7 @@ app.get("/api/campuses-full", (req, res) => {
     });
 });
 
-// --- CONTACTS (Matches your 'contacts' table) ---
+// --- CONTACTS ---
 app.post("/api/contact", (req, res) => {
     const { name, email, subject, message } = req.body;
     const sql = "INSERT INTO contacts (name, email, subject, message) VALUES (?, ?, ?, ?)";
@@ -125,7 +143,7 @@ app.post("/api/contact", (req, res) => {
     });
 });
 
-// --- SUBSCRIBERS (Matches your 'subscribers' table) ---
+// --- SUBSCRIBERS ---
 app.post("/api/subscribe", (req, res) => {
     const { email } = req.body;
     const sql = "INSERT INTO subscribers (email) VALUES (?)";

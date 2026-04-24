@@ -21,14 +21,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Ensure upload directory exists
+// Set up and serve the uploads folder
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir, { recursive: true }); }
-
-// Static folder serving
 app.use("/uploads", express.static(uploadDir));
 
-/* ================= 2. TiDB / MYSQL CONNECTION ================= */
+/* ================= 2. DATABASE CONNECTION ================= */
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -40,26 +38,24 @@ const db = mysql.createConnection({
 
 db.connect(err => {
     if (err) console.error("❌ Database Error:", err.message);
-    else console.log("✅ Connected to TiDB/MySQL");
+    else console.log("✅ Connected to Database");
 });
 
-/* ================= 3. HELPERS & IMAGE SANITIZER ================= */
+/* ================= 3. HELPERS & IMAGE FIXER ================= */
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
 const upload = multer({ storage });
 
-/**
- * Logic: Extracts the filename from old localhost strings and 
- * attaches the current live Render URL.
- */
+// This function fixes the "localhost" issue by creating a valid live link
 const fixImageUrl = (req, dbPath) => {
     if (!dbPath) return null;
     const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const baseUrl = `${protocol}://${req.get("host")}`;
+    const host = req.get("host");
+    const baseUrl = `${protocol}://${host}`;
     
-    // Extract only the filename (e.g., "exit-exam.jpg") from the path
+    // Extracts only the filename (e.g. 'exit-exam.jpg') and adds the live URL
     const filename = dbPath.split(/[\\/]/).pop();
     return `${baseUrl}/uploads/${filename}`;
 };
@@ -70,10 +66,7 @@ const fixImageUrl = (req, dbPath) => {
 app.get("/api/news", (req, res) => {
     db.query("SELECT * FROM news ORDER BY date DESC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        const data = result.map(item => ({
-            ...item,
-            image: fixImageUrl(req, item.image)
-        }));
+        const data = result.map(item => ({ ...item, image: fixImageUrl(req, item.image) }));
         res.json(data);
     });
 });
@@ -88,14 +81,19 @@ app.get("/api/news/:id", (req, res) => {
     });
 });
 
+// --- EVENTS (This fixes your 404 error) ---
+app.get("/api/events", (req, res) => {
+    db.query("SELECT * FROM events ORDER BY event_date ASC", (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(result);
+    });
+});
+
 // --- STAFF ---
 app.get("/api/staff", (req, res) => {
     db.query("SELECT * FROM staff ORDER BY id ASC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        const data = result.map(item => ({
-            ...item,
-            image: fixImageUrl(req, item.image)
-        }));
+        const data = result.map(item => ({ ...item, image: fixImageUrl(req, item.image) }));
         res.json(data);
     });
 });
@@ -123,22 +121,11 @@ app.get("/api/campuses-full", (req, res) => {
         const grouped = results.reduce((acc, curr) => {
             let campus = acc.find(item => item.id === curr.campus_id);
             if (!campus) {
-                campus = {
-                    id: curr.campus_id,
-                    name: curr.campus_name,
-                    description: curr.description,
-                    libraries: []
-                };
+                campus = { id: curr.campus_id, name: curr.campus_name, description: curr.description, libraries: [] };
                 acc.push(campus);
             }
             if (curr.lib_id) {
-                campus.libraries.push({
-                    id: curr.lib_id,
-                    name: curr.lib_name,
-                    capacity: curr.capacity,
-                    type: curr.lib_type,
-                    isMain: curr.is_main 
-                });
+                campus.libraries.push({ id: curr.lib_id, name: curr.lib_name, capacity: curr.capacity, type: curr.lib_type, isMain: curr.is_main });
             }
             return acc;
         }, []);
@@ -146,21 +133,18 @@ app.get("/api/campuses-full", (req, res) => {
     });
 });
 
-// --- CONTACTS ---
+// --- UTILITY ---
 app.post("/api/contact", (req, res) => {
     const { name, email, subject, message } = req.body;
-    const sql = "INSERT INTO contacts (name, email, subject, message) VALUES (?, ?, ?, ?)";
-    db.query(sql, [name, email, subject, message], (err) => {
+    db.query("INSERT INTO contacts (name, email, subject, message) VALUES (?, ?, ?, ?)", [name, email, subject, message], (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: "Message sent!" });
     });
 });
 
-// --- SUBSCRIBERS ---
 app.post("/api/subscribe", (req, res) => {
     const { email } = req.body;
-    const sql = "INSERT INTO subscribers (email) VALUES (?)";
-    db.query(sql, [email], (err) => {
+    db.query("INSERT INTO subscribers (email) VALUES (?)", [email], (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: "Subscribed!" });
     });

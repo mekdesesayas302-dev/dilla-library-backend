@@ -21,11 +21,14 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Ensure upload directory exists
 const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir); }
+if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir, { recursive: true }); }
+
+// Static folder serving
 app.use("/uploads", express.static(uploadDir));
 
-/* ================= 2. TiDB CONNECTION ================= */
+/* ================= 2. TiDB / MYSQL CONNECTION ================= */
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -36,20 +39,29 @@ const db = mysql.createConnection({
 });
 
 db.connect(err => {
-    if (err) console.error("❌ TiDB Error:", err.message);
-    else console.log("✅ Connected to TiDB: dilla_library");
+    if (err) console.error("❌ Database Error:", err.message);
+    else console.log("✅ Connected to TiDB/MySQL");
 });
 
-/* ================= 3. HELPERS ================= */
+/* ================= 3. HELPERS & IMAGE SANITIZER ================= */
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
 const upload = multer({ storage });
 
-const getBaseUrl = (req) => {
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    return `${protocol}://${req.get("host")}`;
+/**
+ * Logic: Extracts the filename from old localhost strings and 
+ * attaches the current live Render URL.
+ */
+const fixImageUrl = (req, dbPath) => {
+    if (!dbPath) return null;
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const baseUrl = `${protocol}://${req.get("host")}`;
+    
+    // Extract only the filename (e.g., "exit-exam.jpg") from the path
+    const filename = dbPath.split(/[\\/]/).pop();
+    return `${baseUrl}/uploads/${filename}`;
 };
 
 /* ================= 4. API ENDPOINTS ================= */
@@ -58,24 +70,21 @@ const getBaseUrl = (req) => {
 app.get("/api/news", (req, res) => {
     db.query("SELECT * FROM news ORDER BY date DESC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
+        const data = result.map(item => ({
+            ...item,
+            image: fixImageUrl(req, item.image)
+        }));
+        res.json(data);
     });
 });
 
-// Added: Single News Route
 app.get("/api/news/:id", (req, res) => {
     db.query("SELECT * FROM news WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
         if (result.length === 0) return res.status(404).json({ message: "News not found" });
-        res.json(result[0]);
-    });
-});
-
-// --- EVENTS ---
-app.get("/api/events", (req, res) => {
-    db.query("SELECT * FROM events ORDER BY event_date ASC", (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
+        const news = result[0];
+        news.image = fixImageUrl(req, news.image);
+        res.json(news);
     });
 });
 
@@ -83,16 +92,21 @@ app.get("/api/events", (req, res) => {
 app.get("/api/staff", (req, res) => {
     db.query("SELECT * FROM staff ORDER BY id ASC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
+        const data = result.map(item => ({
+            ...item,
+            image: fixImageUrl(req, item.image)
+        }));
+        res.json(data);
     });
 });
 
-// Added: Single Staff Route (This fixes your "Staff profile not found" error)
 app.get("/api/staff/:id", (req, res) => {
     db.query("SELECT * FROM staff WHERE id = ?", [req.params.id], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
         if (result.length === 0) return res.status(404).json({ message: "Staff not found" });
-        res.json(result[0]);
+        const staff = result[0];
+        staff.image = fixImageUrl(req, staff.image);
+        res.json(staff);
     });
 });
 
@@ -106,7 +120,6 @@ app.get("/api/campuses-full", (req, res) => {
     `;
     db.query(sql, (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
-        
         const grouped = results.reduce((acc, curr) => {
             let campus = acc.find(item => item.id === curr.campus_id);
             if (!campus) {
@@ -155,4 +168,4 @@ app.post("/api/subscribe", (req, res) => {
 
 /* ================= 5. START SERVER ================= */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server running on port ${PORT}`));

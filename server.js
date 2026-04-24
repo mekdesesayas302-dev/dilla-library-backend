@@ -2,15 +2,12 @@ import express from "express";
 import cors from "cors";
 import mysql from "mysql2";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from 'url';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const app = express();
 
 /* ================= 1. MIDDLEWARE ================= */
@@ -20,11 +17,6 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
-
-// Set up and serve the uploads folder
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir, { recursive: true }); }
-app.use("/uploads", express.static(uploadDir));
 
 /* ================= 2. DATABASE CONNECTION ================= */
 const db = mysql.createConnection({
@@ -41,70 +33,70 @@ db.connect(err => {
     else console.log("✅ Connected to Database");
 });
 
-/* ================= 3. HELPERS & IMAGE FIXER ================= */
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
+/* ================= 3. CLOUDINARY CONFIGURATION ================= */
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
 });
-const upload = multer({ storage });
 
-// This function fixes the "localhost" issue by creating a valid live link
-const fixImageUrl = (req, dbPath) => {
-    if (!dbPath) return null;
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.get("host");
-    const baseUrl = `${protocol}://${host}`;
-    
-    // Extracts only the filename (e.g. 'exit-exam.jpg') and adds the live URL
-    const filename = dbPath.split(/[\\/]/).pop();
-    return `${baseUrl}/uploads/${filename}`;
-};
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'dilla_library',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
+    },
+});
+
+const upload = multer({ storage });
 
 /* ================= 4. API ENDPOINTS ================= */
 
-// --- NEWS ---
+// --- NEWS (FETCH) ---
 app.get("/api/news", (req, res) => {
     db.query("SELECT * FROM news ORDER BY date DESC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        const data = result.map(item => ({ ...item, image: fixImageUrl(req, item.image) }));
-        res.json(data);
+        res.json(result); // Images are now full Cloudinary URLs
     });
 });
 
-app.get("/api/news/:id", (req, res) => {
-    db.query("SELECT * FROM news WHERE id = ?", [req.params.id], (err, result) => {
+// --- NEWS (CREATE with Cloudinary) ---
+app.post("/api/news", upload.single("image"), (req, res) => {
+    const { title, category, date, content } = req.body;
+    const imageUrl = req.file ? req.file.path : null; // This is the Cloudinary URL
+
+    const sql = "INSERT INTO news (title, category, date, content, image) VALUES (?, ?, ?, ?, ?)";
+    db.query(sql, [title, category, date, content, imageUrl], (err) => {
         if (err) return res.status(500).json({ error: err.message });
-        if (result.length === 0) return res.status(404).json({ message: "News not found" });
-        const news = result[0];
-        news.image = fixImageUrl(req, news.image);
-        res.json(news);
+        res.json({ message: "News added successfully!" });
     });
 });
 
-// --- EVENTS (This fixes your 404 error) ---
-app.get("/api/events", (req, res) => {
-    db.query("SELECT * FROM events ORDER BY event_date ASC", (err, result) => {
+// --- STAFF (FETCH) ---
+app.get("/api/staff", (req, res) => {
+    db.query("SELECT * FROM staff ORDER BY id ASC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(result);
     });
 });
 
-// --- STAFF ---
-app.get("/api/staff", (req, res) => {
-    db.query("SELECT * FROM staff ORDER BY id ASC", (err, result) => {
+// --- STAFF (CREATE with Cloudinary) ---
+app.post("/api/staff", upload.single("image"), (req, res) => {
+    const { name, position, campus, bio, email, phone } = req.body;
+    const imageUrl = req.file ? req.file.path : null;
+
+    const sql = "INSERT INTO staff (name, position, campus, bio, email, phone, image) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    db.query(sql, [name, position, campus, bio, email, phone, imageUrl], (err) => {
         if (err) return res.status(500).json({ error: err.message });
-        const data = result.map(item => ({ ...item, image: fixImageUrl(req, item.image) }));
-        res.json(data);
+        res.json({ message: "Staff added successfully!" });
     });
 });
 
-app.get("/api/staff/:id", (req, res) => {
-    db.query("SELECT * FROM staff WHERE id = ?", [req.params.id], (err, result) => {
+// --- EVENTS ---
+app.get("/api/events", (req, res) => {
+    db.query("SELECT * FROM events ORDER BY event_date ASC", (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        if (result.length === 0) return res.status(404).json({ message: "Staff not found" });
-        const staff = result[0];
-        staff.image = fixImageUrl(req, staff.image);
-        res.json(staff);
+        res.json(result);
     });
 });
 
@@ -152,4 +144,4 @@ app.post("/api/subscribe", (req, res) => {
 
 /* ================= 5. START SERVER ================= */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Cloudinary-enabled server running on port ${PORT}`));

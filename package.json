@@ -1,17 +1,9 @@
 {
-  "dependencies": {
-    "cloudinary": "^2.9.0",
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "multer": "^2.1.1",
-    "mysql2": "^3.22.0",
-    "nodemailer": "^8.0.5"
-  },
-  "name": "backend",
+  "name": "dilla-library-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "db.js",
+  "description": "Backend for Dilla University Library",
+  "type": "module",
+  "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
@@ -20,6 +12,16 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "cloudinary": "^2.9.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "multer": "^1.4.5-lts.1",
+    "multer-storage-cloudinary": "^4.0.0",
+    "mysql2": "^3.22.0",
+    "nodemailer": "^8.0.5"
+  },
   "devDependencies": {
     "nodemon": "^3.1.14"
   }
